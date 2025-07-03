@@ -4,6 +4,10 @@ import pandas as pd
 import requests
 import os
 
+from airflow.providers.email.operators.email import EmailOperator
+from airflow.sensors.filesystem import FileSensor
+from airflow.operators.empty import EmptyOperator
+
 url = "https://s3.amazonaws.com/nyc-tlc/trip+data/yellow_tripdata_2023-01.csv"
 csv_path = "/opt/airflow/data/taxi.csv"
 cleaned_path = "/opt/airflow/data/taxi_cleaned.csv"
@@ -16,6 +20,16 @@ cleaned_path = "/opt/airflow/data/taxi_cleaned.csv"
     tags=["project"]
 )
 def real_pipeline():
+    start = EmptyOperator(task_id="start")
+
+    wait_for_file = FileSensor(
+        task_id="wait_for_taxi_file",
+        filepath=csv_path,
+        poke_interval=10,
+        timeout=300,
+        mode="poke"
+    )
+
     @task
     def download():
         os.makedirs("/opt/airflow/data", exist_ok=True)
@@ -29,6 +43,14 @@ def real_pipeline():
         df_clean = df.dropna()
         df_clean.to_csv(cleaned_path, index=False)
 
-    download() >> clean()
+    send_email = EmailOperator(
+        task_id='send_email',
+        to='mail@gmail.com', # à changer
+        subject='Airflow: ETL Pipeline Complete ✅',
+        html_content='<h3>NYC Taxi ETL pipeline has completed successfully!</h3>',
+    )
+
+    # DAG structure
+    start >> download() >> wait_for_file >> clean() >> send_email
 
 dag = real_pipeline()
